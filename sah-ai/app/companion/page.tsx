@@ -266,12 +266,10 @@ export default function CompanionPage() {
           ws.send(
             JSON.stringify({
               realtimeInput: {
-                mediaChunks: [
-                  {
-                    mimeType: "audio/pcm;rate=16000",
-                    data: base64,
-                  },
-                ],
+                audio: {
+                  mimeType: "audio/pcm;rate=16000",
+                  data: base64,
+                },
               },
             })
           );
