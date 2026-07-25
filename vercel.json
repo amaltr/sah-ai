@@ -1,0 +1,6 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npm install --prefix sah-ai && npm run build --prefix sah-ai",
+  "installCommand": "echo skipping",
+  "outputDirectory": "sah-ai/.next"
+}
