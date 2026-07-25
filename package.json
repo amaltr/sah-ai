@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "cd sah-ai && npm run dev",
-    "build": "cd sah-ai && npm run build",
+    "build": "cd sah-ai && npm install && npm run build",
     "start": "cd sah-ai && npm run start",
     "lint": "cd sah-ai && npm run lint",
     "test": "cd sah-ai && npm test"
