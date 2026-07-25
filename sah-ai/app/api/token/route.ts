@@ -48,7 +48,7 @@ export async function POST() {
         newSessionExpireTime: new Date(now + 2 * 60_000).toISOString(), // 2 min to start
         expireTime: new Date(now + 30 * 60_000).toISOString(), // 30 min max
         liveConnectConstraints: {
-          model: "gemini-2.0-flash-exp",
+          model: "models/gemini-3.1-flash-live-preview",
           config: {
             systemInstruction: VOICE_SYSTEM_INSTRUCTION,
             temperature: 0.7,
