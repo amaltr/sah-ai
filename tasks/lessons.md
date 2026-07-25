@@ -5,7 +5,7 @@
 
 ---
 
-## Session 1 — 2026-07-25 (Foundation)
+## Session 1 — 2026-07-25 (Foundation & Hackathon Build)
 
 ### L-001: Archive docs were never actually iterated
 - **What**: v1 and v2 of the architecture doc were byte-identical copies.
@@ -36,3 +36,18 @@
 - **What**: `npm install` took 15+ minutes instead of ~30 seconds.
 - **Why**: The project is inside `OneDrive/Documents/`. npm writes tens of thousands of small files to `node_modules/`. OneDrive syncs every file write in real-time, creating massive I/O overhead.
 - **Rule**: Keep Node.js projects outside OneDrive-synced folders. If you must use OneDrive, pause syncing during `npm install`, or add `node_modules` to OneDrive's excluded folders. This is a known npm issue (npm/cli#4134).
+
+### L-007: Vercel Subdirectory Deployment with Next.js Monorepos
+- **What**: Deployment failed with `404 NOT_FOUND` and `No Next.js version detected`.
+- **Why**: Vercel expects `package.json` at root unless specified. When deploying a subdirectory project, setting `buildCommand: "cd subfolder && npm run build"` when Vercel is already inside `subfolder` causes double `cd` errors.
+- **Rule**: For subdirectory Next.js apps on Vercel, keep a lightweight root `package.json` with `"next"` dependency and build scripts, and specify `"framework": "nextjs"`, `"outputDirectory": ".next"` in `sah-ai/vercel.json`.
+
+### L-008: Live WebSocket API Ephemeral Token Constraints & Barge-in Handling
+- **What**: Companion voice agent monologued without stopping when user interrupted.
+- **Why**: `realtimeInputConfig` was omitted from setup frame and audio playback context queued PCM chunks asynchronously.
+- **Rule**: Always pass `automaticActivityDetection` in setup frames for Live audio models, and listen for `data.serverContent.interrupted` to close/flush the client AudioContext so user speech takes immediate precedence.
+
+### L-009: Attribution Invariants in System Prompts
+- **What**: Gemini Live API defaulted to saying "I was built by Google" or "by the team".
+- **Why**: LLMs default to provider identity unless explicitly given negative attribution rules.
+- **Rule**: Always include explicit origin statements in system prompts when building independent products: state creator name ("Amal T R"), clarify independent identity, and explicitly state who did NOT build it.
