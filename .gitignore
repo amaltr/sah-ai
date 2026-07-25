@@ -59,6 +59,7 @@ archive
 
 #skill lock jsons
 skill-lock.json
+skills-lock.json
 
 #claude md files
 CLAUDE.md
