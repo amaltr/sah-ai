@@ -1,0 +1,892 @@
+/*
+ * Sah-AI Design System
+ *
+ * DESIGN BRIEF:
+ * Subject: Voice-first recovery support at crisis moments (3am, shaking hands)
+ * Audience: People in active SUD recovery + their caregivers
+ * Page's single job: Get someone to a supportive voice or a hotline number
+ *   with as few taps and as little reading as possible.
+ *
+ * DESIGN PLAN:
+ * Palette: Deep navy grounding (#0F172A) as primary surface — night-time
+ *   readability. Warm amber (#F59E0B) as the signature accent — a beacon,
+ *   not a siren. Soft sage (#6EE7B7) for safe/positive states. Muted
+ *   slate (#94A3B8) for secondary text. Off-white (#F8FAFC) for body text.
+ *   NO siren red — ARD-007 explicitly bans clinical/alarming aesthetics.
+ *
+ * Typography: Inter for body (clear, accessible, wide apertures for
+ *   legibility under stress). DM Serif Display for the app title only
+ *   (warmth without clinical formality). System mono for code/status.
+ *
+ * Layout: Single-column, high-whitespace, centered. Voice button is
+ *   physically large (min 80px tap target). Cards stack vertically.
+ *   Mobile-first because the 3am-use-case is a phone in a shaky hand.
+ *
+ * Signature: The voice companion button — a warm, pulsing amber circle
+ *   that breathes slowly (2s ease-in-out). It's the single bold element;
+ *   everything else is quiet and recessive. The pulse is NOT a spinner —
+ *   it's a visual breathing exercise. Connects to the product's
+ *   DBT grounding philosophy.
+ *
+ * Self-critique: Avoided the generic dark-mode-with-acid-green look.
+ *   Amber is specific to THIS brief (warmth, beacon, hope) — not a
+ *   default choice. The breathing animation IS the product's identity.
+ */
+
+/* ========================================================================
+   CSS Custom Properties (Design Tokens)
+   ======================================================================== */
+
+:root {
+  /* Palette */
+  --color-surface:        #0F172A;
+  --color-surface-raised: #1E293B;
+  --color-accent:         #F59E0B;
+  --color-accent-glow:    rgba(245, 158, 11, 0.15);
+  --color-safe:           #6EE7B7;
+  --color-safe-dim:       rgba(110, 231, 183, 0.12);
+  --color-text-primary:   #F8FAFC;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted:     #64748B;
+  --color-border:         #334155;
+  --color-danger:         #F87171; /* Only for actual errors, never decorative */
+  --color-caregiver:      #A78BFA; /* Distinct accent for caregiver mode */
+
+  /* Typography */
+  --font-body:    var(--font-geist-sans), "Inter", system-ui, sans-serif;
+  --font-display: "DM Serif Display", Georgia, serif;
+  --font-mono:    var(--font-geist-mono), "JetBrains Mono", monospace;
+
+  /* Type Scale (Major Third — 1.25) */
+  --text-xs:    0.75rem;   /* 12px */
+  --text-sm:    0.875rem;  /* 14px */
+  --text-base:  1rem;      /* 16px */
+  --text-lg:    1.25rem;   /* 20px */
+  --text-xl:    1.563rem;  /* 25px */
+  --text-2xl:   1.953rem;  /* 31px */
+  --text-3xl:   2.441rem;  /* 39px */
+
+  /* Spacing (8px base) */
+  --space-1: 0.25rem;  /* 4px */
+  --space-2: 0.5rem;   /* 8px */
+  --space-3: 0.75rem;  /* 12px */
+  --space-4: 1rem;     /* 16px */
+  --space-6: 1.5rem;   /* 24px */
+  --space-8: 2rem;     /* 32px */
+  --space-12: 3rem;    /* 48px */
+  --space-16: 4rem;    /* 64px */
+
+  /* Layout */
+  --max-width: 480px; /* Phone-first: content never stretches beyond this */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  /* Animation */
+  --transition-fast: 150ms ease;
+  --transition-base: 250ms ease;
+}
+
+/* ========================================================================
+   Reset & Base
+   ======================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  background-color: var(--color-surface);
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+a:hover {
+  color: var(--color-text-primary);
+}
+
+/* Visible focus states for keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ========================================================================
+   Home Page
+   ======================================================================== */
+
+.home {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: var(--space-6) var(--space-4);
+  max-width: var(--max-width);
+  margin: 0 auto;
+  width: 100%;
+  gap: var(--space-12);
+}
+
+.home__hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-6);
+  text-align: center;
+}
+
+.home__title {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary);
+}
+
+.home__subtitle {
+  font-size: var(--text-lg);
+  color: var(--color-text-secondary);
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+/* ========================================================================
+   Voice Companion CTA — The Signature Element
+   The breathing pulse IS the product's identity.
+   ======================================================================== */
+
+.home__cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  width: 160px;
+  height: 160px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  color: var(--color-surface);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: var(--text-base);
+  box-shadow:
+    0 0 0 0 var(--color-accent-glow),
+    0 4px 24px rgba(245, 158, 11, 0.25);
+  transition:
+    transform var(--transition-base),
+    box-shadow var(--transition-base);
+  animation: breathe 3s ease-in-out infinite;
+  cursor: pointer;
+}
+
+.home__cta:hover {
+  transform: scale(1.05);
+  color: var(--color-surface);
+  box-shadow:
+    0 0 0 12px var(--color-accent-glow),
+    0 8px 32px rgba(245, 158, 11, 0.35);
+}
+
+.home__cta:active {
+  transform: scale(0.98);
+}
+
+.home__cta-icon {
+  font-size: var(--text-2xl);
+  line-height: 1;
+}
+
+.home__cta-text {
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Breathing animation — slow, calming, deliberate.
+   This is NOT a loading spinner. It's a visual grounding exercise. */
+@keyframes breathe {
+  0%, 100% {
+    box-shadow:
+      0 0 0 0 var(--color-accent-glow),
+      0 4px 24px rgba(245, 158, 11, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 0 0 20px transparent,
+      0 4px 24px rgba(245, 158, 11, 0.35);
+  }
+}
+
+/* ========================================================================
+   Navigation Cards
+   ======================================================================== */
+
+.home__nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.home__nav-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.home__nav-card:hover {
+  border-color: var(--color-accent);
+  background: rgba(245, 158, 11, 0.05);
+  color: var(--color-text-primary);
+}
+
+.home__nav-card-icon {
+  font-size: var(--text-xl);
+  flex-shrink: 0;
+}
+
+.home__nav-card-title {
+  font-weight: 600;
+  font-size: var(--text-base);
+  display: block;
+}
+
+.home__nav-card-desc {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  display: block;
+  margin-top: var(--space-1);
+}
+
+/* ========================================================================
+   Disclaimer
+   ======================================================================== */
+
+.home__disclaimer {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+/* ========================================================================
+   Hotline Footer — Zero API Dependency (SAFETY.md §6)
+   ======================================================================== */
+
+.hotline-footer {
+  padding: var(--space-4) var(--space-4) var(--space-6);
+  background: var(--color-surface-raised);
+  border-top: 1px solid var(--color-border);
+}
+
+.hotline-footer__title {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: center;
+  margin-bottom: var(--space-3);
+}
+
+.hotline-footer__list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2) var(--space-4);
+}
+
+.hotline-footer__item {
+  display: inline;
+}
+
+.hotline-footer__link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  transition: color var(--transition-fast);
+  text-decoration: none;
+}
+
+.hotline-footer__link:hover {
+  color: var(--color-accent);
+}
+
+.hotline-footer__label {
+  display: none; /* Show on wider screens */
+}
+
+.hotline-footer__number {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-feature-settings: "tnum";
+}
+
+@media (min-width: 480px) {
+  .hotline-footer__label {
+    display: inline;
+  }
+}
+
+/* ========================================================================
+   Shared Components
+   ======================================================================== */
+
+/* Status indicator (connecting / listening / speaking) */
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.status-indicator__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-text-muted);
+}
+
+.status-indicator__dot--active {
+  background: var(--color-safe);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Crisis content card */
+.crisis-card {
+  padding: var(--space-6);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  max-width: var(--max-width);
+  margin: 0 auto;
+}
+
+.crisis-card__title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  margin-bottom: var(--space-4);
+}
+
+.crisis-card__body {
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  white-space: pre-line;
+  margin-bottom: var(--space-6);
+}
+
+.crisis-card__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.crisis-card__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: var(--color-surface);
+  font-weight: 600;
+  font-size: var(--text-lg);
+  text-decoration: none;
+  transition: opacity var(--transition-fast);
+  min-height: 56px; /* Accessible tap target */
+}
+
+.crisis-card__action:hover {
+  opacity: 0.9;
+  color: var(--color-surface);
+}
+
+/* Error state */
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-8);
+  text-align: center;
+}
+
+.error-state__message {
+  color: var(--color-text-secondary);
+  max-width: 320px;
+}
+
+/* ========================================================================
+   Voice Companion Page
+   ======================================================================== */
+
+.companion {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: var(--space-6) var(--space-4);
+  max-width: var(--max-width);
+  margin: 0 auto;
+  width: 100%;
+  gap: var(--space-8);
+}
+
+.companion__header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.companion__title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+}
+
+.companion__main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.companion__cta {
+  border: none;
+}
+
+.companion__end-btn {
+  padding: var(--space-3) var(--space-8);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--text-base);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.companion__end-btn:hover {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.companion__hint {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* ========================================================================
+   Triage Page
+   ======================================================================== */
+
+.triage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  padding: var(--space-8) var(--space-4);
+  max-width: var(--max-width);
+  margin: 0 auto;
+  width: 100%;
+  gap: var(--space-6);
+}
+
+.triage--terminal {
+  padding-top: var(--space-4);
+}
+
+.triage__back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  padding: var(--space-2) 0;
+  transition: color var(--transition-fast);
+}
+
+.triage__back:hover {
+  color: var(--color-accent);
+}
+
+.triage__title {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  text-align: center;
+}
+
+.triage__subtitle {
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.triage__options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.triage__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+  min-height: 80px; /* Accessible large tap target */
+}
+
+.triage__option:hover {
+  border-color: var(--color-accent);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.triage__option--emergency:hover {
+  border-color: var(--color-danger);
+}
+
+.triage__option--crisis:hover {
+  border-color: var(--color-accent);
+}
+
+.triage__option-icon {
+  font-size: var(--text-2xl);
+  flex-shrink: 0;
+}
+
+.triage__option-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.triage__option-text strong {
+  font-size: var(--text-base);
+}
+
+.triage__option-text span:not(strong) {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ========================================================================
+   Scripts Page
+   ======================================================================== */
+
+.scripts {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  padding: var(--space-6) var(--space-4);
+  max-width: var(--max-width);
+  margin: 0 auto;
+  width: 100%;
+  gap: var(--space-6);
+}
+
+.scripts__title {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+}
+
+.scripts__subtitle {
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+/* Mode Toggle */
+.scripts__mode-toggle {
+  display: flex;
+  gap: var(--space-1);
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-full);
+  padding: var(--space-1);
+  width: 100%;
+}
+
+.scripts__mode-btn {
+  flex: 1;
+  padding: var(--space-3);
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.scripts__mode-btn--active {
+  background: var(--color-accent);
+  color: var(--color-surface);
+}
+
+.scripts__mode-btn--caregiver.scripts__mode-btn--active {
+  background: var(--color-caregiver);
+}
+
+/* Tone Controls */
+.scripts__tone {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.scripts__tone-btn {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.scripts__tone-btn--active {
+  border-color: var(--color-caregiver);
+  color: var(--color-caregiver);
+  background: rgba(167, 139, 250, 0.1);
+}
+
+/* Preset Buttons */
+.scripts__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.scripts__presets-label {
+  width: 100%;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.scripts__preset-btn {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.scripts__preset-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
+}
+
+.scripts__preset-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Custom Context */
+.scripts__custom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.scripts__custom-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.scripts__custom-input {
+  width: 100%;
+  padding: var(--space-4);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  resize: vertical;
+  transition: border-color var(--transition-fast);
+}
+
+.scripts__custom-input:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.scripts__custom-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.scripts__generate-btn {
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--color-surface);
+  font-weight: 600;
+  font-size: var(--text-base);
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.scripts__generate-btn:hover {
+  opacity: 0.9;
+}
+
+.scripts__generate-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Script Result */
+.scripts__result {
+  width: 100%;
+}
+
+.scripts__result-card {
+  padding: var(--space-6);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.scripts__result-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-4);
+}
+
+.scripts__result-tone {
+  margin-left: var(--space-2);
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.scripts__result-text {
+  font-size: var(--text-lg);
+  line-height: 1.7;
+  color: var(--color-text-primary);
+  border-left: 3px solid var(--color-accent);
+  padding-left: var(--space-4);
+  margin: 0 0 var(--space-4) 0;
+}
+
+.scripts__result-citations {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-4);
+}
+
+.scripts__result-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.scripts__save-btn {
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: 1px solid var(--color-safe);
+  border-radius: var(--radius-md);
+  color: var(--color-safe);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.scripts__save-btn:hover {
+  background: var(--color-safe-dim);
+}
+
+.scripts__save-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.crisis-card__action-label {
+  font-size: var(--text-sm);
+  font-weight: 400;
+  opacity: 0.8;
+  margin-left: var(--space-2);
+}
