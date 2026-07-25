@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     const userPrompt = `Context: ${context}\nTone: ${tone}`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-3.6-flash",
       contents: userPrompt,
       config: {
         systemInstruction: systemPrompt,
