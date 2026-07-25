@@ -58,6 +58,10 @@ export default function ScriptsPage() {
         }),
       });
 
+      if (!res.ok) {
+        throw new Error(`Generation failed: ${res.status}`);
+      }
+
       const data = (await res.json()) as GeneratedScript;
       setScript(data);
     } catch {
@@ -209,9 +213,9 @@ export default function ScriptsPage() {
             <blockquote className="scripts__result-text">
               {script.scriptText}
             </blockquote>
-            {script.citationsUsed.length > 0 && (
+            {(script.citationsUsed?.length ?? 0) > 0 && (
               <p className="scripts__result-citations">
-                Sources: {script.citationsUsed.join(", ")}
+                Sources: {script.citationsUsed?.join(", ")}
               </p>
             )}
             <div className="scripts__result-actions">

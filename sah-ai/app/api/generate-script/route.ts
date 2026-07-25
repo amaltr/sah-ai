@@ -128,13 +128,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(generated);
   } catch (error) {
     console.error("[/api/generate-script] Unhandled error:", error);
+    // Return safety fallback script instead of failing
+    const body = typeof request === "object" ? await request.json().catch(() => ({})) : {};
+    const isCaregiver = body?.mode === "caregiver";
     return NextResponse.json(
-      {
-        error: "Script generation failed",
-        code: "GENERATE_ERROR",
-        fallbackContent: GENERIC_CRISIS_RESPONSE,
-      },
-      { status: 500 }
+      isCaregiver ? FALLBACK_SCRIPT_CAREGIVER : FALLBACK_SCRIPT_PIR
     );
   }
 }
