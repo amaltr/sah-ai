@@ -242,6 +242,11 @@ export default function CompanionPage() {
                   },
                 },
               },
+              realtimeInputConfig: {
+                automaticActivityDetection: {
+                  disabled: false,
+                },
+              },
             },
           })
         );
@@ -299,6 +304,17 @@ export default function CompanionPage() {
           }
 
           if (data?.serverContent?.turnComplete) {
+            setState("listening");
+          }
+
+          // Handle barge-in: user interrupted while model was speaking
+          if (data?.serverContent?.interrupted) {
+            // Flush queued playback so user's voice takes priority
+            if (playbackCtxRef.current && playbackCtxRef.current.state !== "closed") {
+              playbackCtxRef.current.close().catch(() => {});
+              playbackCtxRef.current = null;
+            }
+            nextStartTimeRef.current = 0;
             setState("listening");
           }
         } catch (e) {
