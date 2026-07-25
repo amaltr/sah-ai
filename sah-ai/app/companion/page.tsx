@@ -1,22 +1,20 @@
 /**
- * Voice Companion Page — The flagship zero-typing flow.
+ * Voice Companion Page — Bidirectional Gemini Live API Streaming.
  *
  * Architecture (ARD-002):
- * - Client fetches ephemeral token from /api/token
- * - Browser opens direct WebSocket to Gemini Live API
- * - Audio streams bidirectionally (no server proxy)
- * - Parallel: each turn's transcript sent to /api/classify
- * - If crisis tag detected: immediately close WebSocket, show static content
- *
- * Fallback (ARD-002):
- * - If Live API connection fails: fall back to Web Speech API + generateContent
+ * - Ephemeral token minted server-side with v1alpha constraints.
+ * - Client captures microphone PCM (16kHz 16-bit mono) via Web Audio API.
+ * - Client streams `realtimeInput` base64 audio chunks to Gemini WebSocket.
+ * - Client decodes incoming 24kHz PCM base64 audio from Gemini and plays via Web Audio API.
+ * - Parallel: text parts sent to /api/classify for crisis detection.
+ * - Crisis detection immediately terminates session & displays pre-authored static card.
  *
  * @module companion/page
  */
 
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { CrisisCard } from "../components/crisis-card";
 import { ErrorState } from "../components/error-state";
 import type { CrisisContent, ClassifyResult } from "@/lib/types";
@@ -31,40 +29,169 @@ type SessionState =
 
 export default function CompanionPage() {
   const [state, setState] = useState<SessionState>("idle");
-  const [crisisContent, setCrisisContent] = useState<CrisisContent | null>(
-    null
-  );
+  const [crisisContent, setCrisisContent] = useState<CrisisContent | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [transcript, setTranscript] = useState<string>("");
+
   const wsRef = useRef<WebSocket | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const playbackCtxRef = useRef<AudioContext | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const nextStartTimeRef = useRef<number>(0);
+
+  // Clean up Web Audio resources
+  const cleanupAudio = useCallback(() => {
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
+    }
+    if (playbackCtxRef.current) {
+      playbackCtxRef.current.close().catch(() => {});
+      playbackCtxRef.current = null;
+    }
+    nextStartTimeRef.current = 0;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      cleanupAudio();
+    };
+  }, [cleanupAudio]);
+
+  // Play incoming 24kHz 16-bit PCM audio base64 chunk from Gemini
+  const playAudioChunk = useCallback((base64Data: string) => {
+    try {
+      if (!playbackCtxRef.current || playbackCtxRef.current.state === "closed") {
+        const AudioCtx =
+          window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        playbackCtxRef.current = new AudioCtx({ sampleRate: 24000 });
+      }
+
+      const playbackCtx = playbackCtxRef.current;
+      if (playbackCtx.state === "suspended") {
+        playbackCtx.resume();
+      }
+
+      const binary = atob(base64Data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const int16 = new Int16Array(bytes.buffer);
+      const float32 = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) {
+        float32[i] = int16[i] / (int16[i] < 0 ? 0x8000 : 0x7fff);
+      }
+
+      const audioBuffer = playbackCtx.createBuffer(1, float32.length, 24000);
+      audioBuffer.getChannelData(0).set(float32);
+
+      const source = playbackCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(playbackCtx.destination);
+
+      const currentTime = playbackCtx.currentTime;
+      if (nextStartTimeRef.current < currentTime) {
+        nextStartTimeRef.current = currentTime;
+      }
+      source.start(nextStartTimeRef.current);
+      nextStartTimeRef.current += audioBuffer.duration;
+    } catch (e) {
+      console.error("[companion] Error playing audio chunk:", e);
+    }
+  }, []);
+
+  const handleCrisisDetected = useCallback(
+    (content: CrisisContent) => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      cleanupAudio();
+      setCrisisContent(content);
+      setState("crisis");
+    },
+    [cleanupAudio]
+  );
+
+  // Parallel Risk Classification on text transcripts
+  const classifyInput = useCallback(
+    async (text: string) => {
+      try {
+        const res = await fetch("/api/classify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input: text }),
+        });
+        const result = (await res.json()) as ClassifyResult & {
+          isCrisis?: boolean;
+          crisisContent?: CrisisContent;
+        };
+        if (result.isCrisis && result.crisisContent) {
+          handleCrisisDetected(result.crisisContent);
+        }
+      } catch {
+        // Classification network error doesn't break active voice session
+      }
+    },
+    [handleCrisisDetected]
+  );
 
   const startSession = useCallback(async () => {
-    // Idempotent: don't double-connect (edge case: double-tap)
     if (state === "connecting" || state === "listening" || state === "speaking") {
       return;
     }
 
     setState("connecting");
     setErrorMessage("");
+    setTranscript("");
 
     try {
-      // Step 1: Fetch ephemeral token
+      // Step 1: Fetch short-lived ephemeral token
       const tokenRes = await fetch("/api/token", { method: "POST" });
       if (!tokenRes.ok) {
         throw new Error(`Token fetch failed: ${tokenRes.status}`);
       }
       const { token } = await tokenRes.json();
 
-      // Step 2: Connect to Gemini Live API via WebSocket
-      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${token}`;
+      // Step 2: Request Microphone access (16kHz 1-channel mono)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      mediaStreamRef.current = stream;
 
+      const AudioCtx =
+        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const audioCtx = new AudioCtx({ sampleRate: 16000 });
+      audioCtxRef.current = audioCtx;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+
+      // Step 3: Open Gemini WebSocket BidiConnect
+      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${token}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
         setState("listening");
 
-        // Send setup message — model + system instruction are locked
-        // by the ephemeral token constraints. Only voice selection is client-side.
+        // Send setup frame
         ws.send(
           JSON.stringify({
             setup: {
@@ -80,43 +207,81 @@ export default function CompanionPage() {
             },
           })
         );
+
+        // Connect microphone processor to send PCM base64 chunks
+        processor.onaudioprocess = (e) => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcm16 = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            const s = Math.max(-1, Math.min(1, inputData[i]));
+            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          }
+
+          const bytes = new Uint8Array(pcm16.buffer);
+          let binary = "";
+          for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64 = btoa(binary);
+
+          ws.send(
+            JSON.stringify({
+              realtimeInput: {
+                mediaChunks: [
+                  {
+                    mimeType: "audio/pcm;rate=16000",
+                    data: base64,
+                  },
+                ],
+              },
+            })
+          );
+        };
+
+        source.connect(processor);
+        processor.connect(audioCtx.destination);
       };
 
       ws.onmessage = async (event) => {
         try {
-          const data = JSON.parse(
-            typeof event.data === "string"
-              ? event.data
-              : await (event.data as Blob).text()
-          );
+          const rawText =
+            typeof event.data === "string" ? event.data : await (event.data as Blob).text();
+          const data = JSON.parse(rawText);
 
-          // Check if there's transcript text for classification
+          // Handle incoming parts from model turn
           if (data?.serverContent?.modelTurn?.parts) {
-            const textParts = data.serverContent.modelTurn.parts.filter(
-              (p: { text?: string }) => p.text
-            );
-            if (textParts.length > 0) {
-              setState("speaking");
+            for (const part of data.serverContent.modelTurn.parts) {
+              // Audio data from Gemini
+              if (part?.inlineData?.data) {
+                setState("speaking");
+                playAudioChunk(part.inlineData.data);
+              }
+              // Text transcript from Gemini
+              if (part?.text) {
+                setTranscript((prev) => prev + " " + part.text);
+                classifyInput(part.text);
+              }
             }
           }
 
-          // Check turn completion
           if (data?.serverContent?.turnComplete) {
             setState("listening");
           }
         } catch {
-          // Non-JSON message (binary audio) — ignore
+          // Non-JSON message handler
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (err) => {
+        console.error("[companion] WebSocket error:", err);
         setState("error");
-        setErrorMessage(
-          "Voice connection lost. Help is still available below."
-        );
+        setErrorMessage("Voice connection error. Crisis hotlines are still available below.");
       };
 
       ws.onclose = () => {
+        cleanupAudio();
         if (state !== "crisis" && state !== "error") {
           setState("idle");
         }
@@ -124,62 +289,22 @@ export default function CompanionPage() {
       };
     } catch (error) {
       console.error("[companion] Session start failed:", error);
+      cleanupAudio();
       setState("error");
       setErrorMessage(
-        "Could not start voice session. Help is still available below."
+        "Could not access microphone or connect to voice service. Help is available below."
       );
     }
-  }, [state]);
+  }, [state, cleanupAudio, playAudioChunk, classifyInput]);
 
   const endSession = useCallback(() => {
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
+    cleanupAudio();
     setState("idle");
-  }, []);
-
-  const handleCrisisDetected = useCallback(
-    (content: CrisisContent) => {
-      // Immediately terminate voice session, show static content
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      setCrisisContent(content);
-      setState("crisis");
-    },
-    []
-  );
-
-  // Classify user input in parallel (called during voice turns)
-  const classifyInput = useCallback(
-    async (transcript: string) => {
-      try {
-        const res = await fetch("/api/classify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: transcript }),
-        });
-        const result = (await res.json()) as ClassifyResult & {
-          isCrisis?: boolean;
-          crisisContent?: CrisisContent;
-        };
-        if (result.isCrisis && result.crisisContent) {
-          handleCrisisDetected(result.crisisContent);
-        }
-      } catch {
-        // Classification failure doesn't break the voice session
-        // The next turn will retry
-      }
-    },
-    [handleCrisisDetected]
-  );
-
-  // Keep classifyInput referenced (used in audio processing pipeline)
-  void classifyInput;
-
-  // --- Render ---
+  }, [cleanupAudio]);
 
   if (state === "crisis" && crisisContent) {
     return (
@@ -209,9 +334,9 @@ export default function CompanionPage() {
           />
           <span>
             {state === "idle" && "Ready"}
-            {state === "connecting" && "Connecting..."}
+            {state === "connecting" && "Connecting microphone..."}
             {state === "listening" && "Listening..."}
-            {state === "speaking" && "Speaking..."}
+            {state === "speaking" && "Sah-AI Speaking..."}
           </span>
         </div>
       </div>
@@ -241,10 +366,16 @@ export default function CompanionPage() {
         )}
       </div>
 
+      {transcript.trim() && (
+        <div className="companion__transcript" aria-live="polite">
+          <p className="companion__transcript-text">{transcript}</p>
+        </div>
+      )}
+
       <p className="companion__hint">
         {state === "idle"
-          ? "Tap the button and just talk. No typing needed."
-          : "Take a breath. Sah-AI is here with you."}
+          ? "Tap the button and allow mic access to talk. No typing needed."
+          : "Take a slow breath. Sah-AI is listening."}
       </p>
     </div>
   );

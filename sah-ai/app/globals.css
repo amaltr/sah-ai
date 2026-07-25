@@ -538,6 +538,22 @@ a:hover {
   text-align: center;
 }
 
+.companion__transcript {
+  width: 100%;
+  max-width: 400px;
+  padding: var(--space-4);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-4);
+}
+
+.companion__transcript-text {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
 /* ========================================================================
    Triage Page
    ======================================================================== */
