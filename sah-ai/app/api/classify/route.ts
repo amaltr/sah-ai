@@ -17,6 +17,9 @@ import { ClassifyRequestSchema } from "@/lib/types";
 import { getCrisisContentForTag } from "@/lib/content/crisis-static";
 import { CRISIS_TAGS } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();

@@ -21,6 +21,9 @@ import {
   GENERIC_CRISIS_RESPONSE,
 } from "@/lib/content/crisis-static";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 const SCRIPT_SYSTEM_PROMPT_PIR = `You are a compassionate script writer helping someone in substance use recovery.
 
 Generate a short, spoken script (under 60 words) they can read aloud or rehearse mentally.

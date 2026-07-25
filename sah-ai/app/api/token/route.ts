@@ -13,6 +13,9 @@
 import { NextResponse } from "next/server";
 import { GoogleGenAI, Modality } from "@google/genai";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 const VOICE_SYSTEM_INSTRUCTION = `You are Sah-AI, a warm, grounding voice companion for people navigating substance use recovery.
 
 RULES:
