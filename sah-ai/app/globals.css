@@ -554,6 +554,28 @@ a:hover {
   line-height: 1.5;
 }
 
+.companion__visualizer {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.companion__visualizer-bar {
+  height: 8px;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+  transition: width 100ms ease-out;
+}
+
+.companion__visualizer-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 /* ========================================================================
    Triage Page
    ======================================================================== */

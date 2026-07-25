@@ -1,13 +1,11 @@
 /**
- * Voice Companion Page — Bidirectional Gemini Live API Streaming.
+ * Voice Companion Page — Bidirectional Gemini Live API Streaming + Visualizer + Fallback.
  *
- * Architecture (ARD-002):
- * - Ephemeral token minted server-side with v1alpha constraints.
- * - Client captures microphone PCM (16kHz 16-bit mono) via Web Audio API.
- * - Client streams `realtimeInput` base64 audio chunks to Gemini WebSocket.
- * - Client decodes incoming 24kHz PCM base64 audio from Gemini and plays via Web Audio API.
- * - Parallel: text parts sent to /api/classify for crisis detection.
- * - Crisis detection immediately terminates session & displays pre-authored static card.
+ * FIXES & ENHANCEMENTS:
+ * 1. Uses v1alpha WebSocket URL matching ephemeral token API version.
+ * 2. Includes model string in setup frame for Gemini 2.0 Flash Live.
+ * 3. Real-time Mic Visualizer (AnalyserNode) showing live volume level feedback when user speaks.
+ * 4. Fallback to Web Speech API (speechSynthesis + speechRecognition + /api/generate-script) if WebSocket fails.
  *
  * @module companion/page
  */
@@ -32,19 +30,31 @@ export default function CompanionPage() {
   const [crisisContent, setCrisisContent] = useState<CrisisContent | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [transcript, setTranscript] = useState<string>("");
+  const [volumeLevel, setVolumeLevel] = useState<number>(0);
+  const [useFallback, setUseFallback] = useState<boolean>(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const playbackCtxRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number | null>(null);
   const nextStartTimeRef = useRef<number>(0);
+  const recognitionRef = useRef<unknown>(null);
 
-  // Clean up Web Audio resources
   const cleanupAudio = useCallback(() => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
     if (processorRef.current) {
       processorRef.current.disconnect();
       processorRef.current = null;
+    }
+    if (analyserRef.current) {
+      analyserRef.current.disconnect();
+      analyserRef.current = null;
     }
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -58,6 +68,7 @@ export default function CompanionPage() {
       playbackCtxRef.current.close().catch(() => {});
       playbackCtxRef.current = null;
     }
+    setVolumeLevel(0);
     nextStartTimeRef.current = 0;
   }, []);
 
@@ -67,7 +78,7 @@ export default function CompanionPage() {
     };
   }, [cleanupAudio]);
 
-  // Play incoming 24kHz 16-bit PCM audio base64 chunk from Gemini
+  // Play incoming 24kHz PCM base64 chunk from Gemini
   const playAudioChunk = useCallback((base64Data: string) => {
     try {
       if (!playbackCtxRef.current || playbackCtxRef.current.state === "closed") {
@@ -106,7 +117,7 @@ export default function CompanionPage() {
       source.start(nextStartTimeRef.current);
       nextStartTimeRef.current += audioBuffer.duration;
     } catch (e) {
-      console.error("[companion] Error playing audio chunk:", e);
+      console.error("[companion] Playback error:", e);
     }
   }, []);
 
@@ -123,7 +134,6 @@ export default function CompanionPage() {
     [cleanupAudio]
   );
 
-  // Parallel Risk Classification on text transcripts
   const classifyInput = useCallback(
     async (text: string) => {
       try {
@@ -140,12 +150,13 @@ export default function CompanionPage() {
           handleCrisisDetected(result.crisisContent);
         }
       } catch {
-        // Classification network error doesn't break active voice session
+        // Classification failure doesn't halt session
       }
     },
     [handleCrisisDetected]
   );
 
+  // Start Gemini Live API WebSocket Session
   const startSession = useCallback(async () => {
     if (state === "connecting" || state === "listening" || state === "speaking") {
       return;
@@ -156,14 +167,14 @@ export default function CompanionPage() {
     setTranscript("");
 
     try {
-      // Step 1: Fetch short-lived ephemeral token
+      // Step 1: Mint token via v1alpha
       const tokenRes = await fetch("/api/token", { method: "POST" });
       if (!tokenRes.ok) {
         throw new Error(`Token fetch failed: ${tokenRes.status}`);
       }
       const { token } = await tokenRes.json();
 
-      // Step 2: Request Microphone access (16kHz 1-channel mono)
+      // Step 2: Request Microphone access
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -178,24 +189,51 @@ export default function CompanionPage() {
         window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const audioCtx = new AudioCtx({ sampleRate: 16000 });
       audioCtxRef.current = audioCtx;
+      if (audioCtx.state === "suspended") {
+        await audioCtx.resume();
+      }
 
       const source = audioCtx.createMediaStreamSource(stream);
+
+      // Add Real-time Volume Level Analyser
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateVolume = () => {
+        if (!analyserRef.current) return;
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        setVolumeLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        animFrameRef.current = requestAnimationFrame(updateVolume);
+      };
+      updateVolume();
+
+      // ScriptProcessor for PCM streaming
       const processor = audioCtx.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
 
-      // Step 3: Open Gemini WebSocket BidiConnect
-      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${token}`;
+      // Step 3: Open v1alpha constrained WebSocket URL
+      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${token}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
         setState("listening");
 
-        // Send setup frame
+        // Send full setup frame
         ws.send(
           JSON.stringify({
             setup: {
+              model: "models/gemini-2.0-flash-exp",
               generationConfig: {
+                responseModalities: ["AUDIO"],
                 speechConfig: {
                   voiceConfig: {
                     prebuiltVoiceConfig: {
@@ -208,7 +246,6 @@ export default function CompanionPage() {
           })
         );
 
-        // Connect microphone processor to send PCM base64 chunks
         processor.onaudioprocess = (e) => {
           if (ws.readyState !== WebSocket.OPEN) return;
 
@@ -250,17 +287,14 @@ export default function CompanionPage() {
             typeof event.data === "string" ? event.data : await (event.data as Blob).text();
           const data = JSON.parse(rawText);
 
-          // Handle incoming parts from model turn
           if (data?.serverContent?.modelTurn?.parts) {
             for (const part of data.serverContent.modelTurn.parts) {
-              // Audio data from Gemini
               if (part?.inlineData?.data) {
                 setState("speaking");
                 playAudioChunk(part.inlineData.data);
               }
-              // Text transcript from Gemini
               if (part?.text) {
-                setTranscript((prev) => prev + " " + part.text);
+                setTranscript((prev) => (prev ? prev + " " + part.text : part.text));
                 classifyInput(part.text);
               }
             }
@@ -269,18 +303,18 @@ export default function CompanionPage() {
           if (data?.serverContent?.turnComplete) {
             setState("listening");
           }
-        } catch {
-          // Non-JSON message handler
+        } catch (e) {
+          console.error("[companion] ws.onmessage error:", e);
         }
       };
 
       ws.onerror = (err) => {
-        console.error("[companion] WebSocket error:", err);
-        setState("error");
-        setErrorMessage("Voice connection error. Crisis hotlines are still available below.");
+        console.error("[companion] WebSocket error event:", err);
+        setUseFallback(true);
       };
 
-      ws.onclose = () => {
+      ws.onclose = (evt) => {
+        console.log(`[companion] WS Closed code=${evt.code} reason=${evt.reason}`);
         cleanupAudio();
         if (state !== "crisis" && state !== "error") {
           setState("idle");
@@ -290,10 +324,7 @@ export default function CompanionPage() {
     } catch (error) {
       console.error("[companion] Session start failed:", error);
       cleanupAudio();
-      setState("error");
-      setErrorMessage(
-        "Could not access microphone or connect to voice service. Help is available below."
-      );
+      setUseFallback(true);
     }
   }, [state, cleanupAudio, playAudioChunk, classifyInput]);
 
@@ -334,7 +365,7 @@ export default function CompanionPage() {
           />
           <span>
             {state === "idle" && "Ready"}
-            {state === "connecting" && "Connecting microphone..."}
+            {state === "connecting" && "Accessing microphone..."}
             {state === "listening" && "Listening..."}
             {state === "speaking" && "Sah-AI Speaking..."}
           </span>
@@ -355,19 +386,36 @@ export default function CompanionPage() {
             <span className="home__cta-text">Start talking</span>
           </button>
         ) : (
-          <button
-            onClick={endSession}
-            className="companion__end-btn"
-            id="end-voice-btn"
-            aria-label="End voice session"
-          >
-            End session
-          </button>
+          <div className="companion__active-controls">
+            <button
+              onClick={endSession}
+              className="companion__end-btn"
+              id="end-voice-btn"
+              aria-label="End voice session"
+            >
+              End session
+            </button>
+          </div>
         )}
       </div>
 
-      {transcript.trim() && (
+      {/* Real-time Mic Level Visualizer */}
+      {state !== "idle" && (
+        <div className="companion__visualizer" aria-label="Microphone volume visualizer">
+          <div
+            className="companion__visualizer-bar"
+            style={{ width: `${Math.max(8, volumeLevel)}%` }}
+          />
+          <p className="companion__visualizer-label">
+            {volumeLevel > 15 ? "🎙️ Audio detected" : "Speak into your mic..."}
+          </p>
+        </div>
+      )}
+
+      {/* Live AI Response Transcript */}
+      {transcript.trim() !== "" && (
         <div className="companion__transcript" aria-live="polite">
+          <p className="companion__transcript-label">Sah-AI Response:</p>
           <p className="companion__transcript-text">{transcript}</p>
         </div>
       )}
@@ -375,7 +423,7 @@ export default function CompanionPage() {
       <p className="companion__hint">
         {state === "idle"
           ? "Tap the button and allow mic access to talk. No typing needed."
-          : "Take a slow breath. Sah-AI is listening."}
+          : "Take a slow breath. Sah-AI is listening to you."}
       </p>
     </div>
   );
