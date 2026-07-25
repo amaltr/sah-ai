@@ -231,7 +231,7 @@ export default function CompanionPage() {
         ws.send(
           JSON.stringify({
             setup: {
-              model: "models/gemini-2.0-flash-exp",
+              model: "gemini-2.0-flash-exp",
               generationConfig: {
                 responseModalities: ["AUDIO"],
                 speechConfig: {
